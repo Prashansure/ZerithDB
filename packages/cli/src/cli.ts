@@ -3,6 +3,7 @@ import { program } from "commander";
 import chalk from "chalk";
 import { initCommand } from "./commands/init.js";
 import { signalCommand } from "./commands/signal.js";
+import { checkConnectivity } from "./checkConnectivity.js";
 
 const VERSION = "0.1.0";
 
@@ -18,22 +19,28 @@ console.log(
 );
 console.log(chalk.gray(`  Build full-stack apps with ZERO backend. v${VERSION}\n`));
 
-program
-  .name("zerithdb")
-  .description("ZerithDB CLI — scaffold and manage local-first P2P apps")
-  .version(VERSION);
+async function main() {
+  await checkConnectivity();
 
-program
-  .command("init [app-name]")
-  .description("Scaffold a new ZerithDB application")
-  .option("-t, --template <template>", "Starter template", "todo")
-  .option("--no-install", "Skip dependency installation")
-  .action(initCommand);
+  program
+    .name("zerithdb")
+    .description("ZerithDB CLI — scaffold and manage local-first P2P apps")
+    .version(VERSION);
 
-program
-  .command("signal")
-  .description("Start a local WebSocket signaling server for development")
-  .option("-p, --port <port>", "Port to listen on", "4000")
-  .action(signalCommand);
+  program
+    .command("init [app-name]")
+    .description("Scaffold a new ZerithDB application")
+    .option("-t, --template <template>", "Starter template", "todo")
+    .option("--no-install", "Skip dependency installation")
+    .action(initCommand);
 
-program.parse(process.argv);
+  program
+    .command("signal")
+    .description("Start a local WebSocket signaling server for development")
+    .option("-p, --port <port>", "Port to listen on", "4000")
+    .action(signalCommand);
+
+  program.parse(process.argv);
+}
+
+main();
