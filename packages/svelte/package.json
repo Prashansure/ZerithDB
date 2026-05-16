@@ -2,24 +2,35 @@
   "name": "zerithdb-svelte",
   "version": "0.1.0",
   "description": "Svelte store integration for ZerithDB",
+  "license": "Apache-2.0",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
   },
   "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
     "lint": "eslint src",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
   },
   "peerDependencies": {
     "svelte": "^4.0.0 || ^5.0.0",
     "zerithdb-sdk": "*"
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
-    "eslint": "^8.57.0",
+    "zerithdb-eslint-config": "workspace:*",
+    "zerithdb-tsconfig": "workspace:*",
     "svelte": "^4.2.0",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.2.4",
     "typescript": "^5.5.0"
   }
 }
