@@ -7,8 +7,8 @@ can communicate directly, they need to exchange connection metadata (ICE candida
 descriptions). This exchange is handled by a **signaling server** — a lightweight WebSocket relay
 that brokers the initial handshake.
 
-> **Important:** The signaling server never sees your data. It only facilitates peer discovery.
-> Once a WebRTC connection is established, all communication is direct and encrypted between peers.
+> **Important:** The signaling server never sees your data. It only facilitates peer discovery. Once
+> a WebRTC connection is established, all communication is direct and encrypted between peers.
 
 ---
 
@@ -41,12 +41,12 @@ Peer A                  Signaling Server              Peer B
 
 Signaling can fail for several reasons:
 
-| Cause | Symptom |
-|---|---|
-| Signaling server is down | WebSocket connection refused or timed out |
-| Network firewall blocks WebSockets | Connection hangs, then times out |
-| Server overloaded | Slow or dropped messages |
-| Offline / no internet | Immediate connection failure |
+| Cause                              | Symptom                                   |
+| ---------------------------------- | ----------------------------------------- |
+| Signaling server is down           | WebSocket connection refused or timed out |
+| Network firewall blocks WebSockets | Connection hangs, then times out          |
+| Server overloaded                  | Slow or dropped messages                  |
+| Offline / no internet              | Immediate connection failure              |
 
 When signaling fails, ZerithDB cannot broker new peer connections. **Existing** peer connections
 (already established via WebRTC) are unaffected and continue to work.
@@ -73,12 +73,12 @@ Attempt 4: wait 8s
 The SDK emits events you can listen to:
 
 ```ts
-app.sync.on('signaling:disconnected', () => {
-  console.warn('Signaling server unreachable. Retrying...');
+app.sync.on("signaling:disconnected", () => {
+  console.warn("Signaling server unreachable. Retrying...");
 });
 
-app.sync.on('signaling:reconnected', () => {
-  console.log('Signaling server reconnected.');
+app.sync.on("signaling:reconnected", () => {
+  console.log("Signaling server reconnected.");
 });
 ```
 
@@ -88,19 +88,19 @@ You can provide an array of signaling URLs. ZerithDB will try each in order if t
 
 ```ts
 const app = createApp({
-  appId: 'my-app',
+  appId: "my-app",
   sync: {
     signalingUrl: [
-      'wss://signal.zerithdb.dev',       // primary (hosted)
-      'wss://signal-eu.zerithdb.dev',    // secondary (regional)
-      'ws://localhost:4000',             // fallback (local dev)
+      "wss://signal.zerithdb.dev", // primary (hosted)
+      "wss://signal-eu.zerithdb.dev", // secondary (regional)
+      "ws://localhost:4000", // fallback (local dev)
     ],
   },
 });
 ```
 
-ZerithDB cycles through the list until a connection succeeds. If all servers fail, it falls back
-to offline mode and retries in the background.
+ZerithDB cycles through the list until a connection succeeds. If all servers fail, it falls back to
+offline mode and retries in the background.
 
 ### 3. Offline / Local-Only Mode
 
@@ -131,7 +131,7 @@ This means multi-tab sync always works, even fully offline.
 const status = app.sync.signalingStatus();
 // Returns: 'connected' | 'connecting' | 'disconnected' | 'offline'
 
-if (status === 'disconnected') {
+if (status === "disconnected") {
   // Show user a warning banner
 }
 ```
@@ -157,13 +157,13 @@ geographic redundancy.
 
 ## Summary
 
-| Scenario | Behavior |
-|---|---|
-| Signaling server drops | Auto-reconnect with exponential backoff |
-| Primary server down | Failover to next URL in `signalingUrl` array |
-| All servers unreachable | Offline mode — local reads/writes continue |
-| Same browser / tab | BroadcastChannel — no signaling needed |
-| Existing WebRTC connection | Unaffected by signaling failures |
+| Scenario                   | Behavior                                     |
+| -------------------------- | -------------------------------------------- |
+| Signaling server drops     | Auto-reconnect with exponential backoff      |
+| Primary server down        | Failover to next URL in `signalingUrl` array |
+| All servers unreachable    | Offline mode — local reads/writes continue   |
+| Same browser / tab         | BroadcastChannel — no signaling needed       |
+| Existing WebRTC connection | Unaffected by signaling failures             |
 
 > For related topics, see [Architecture Overview](../ARCHITECTURE.md) and
 > [Issue #183 — Multiple Signaling Servers](https://github.com/Zerith-Labs/ZerithDB/issues/183).
