@@ -1,7 +1,7 @@
 {
   "name": "zerithdb-svelte",
   "version": "0.1.0",
-  "description": "Svelte store integration for ZerithDB",
+  "description": "Svelte stores and utilities for ZerithDB",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -14,23 +14,30 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "sideEffects": false,
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts",
-    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
-    "lint": "eslint src",
-    "typecheck": "tsc --noEmit",
+    "build": "tsup src/index.ts --format esm,cjs --dts --treeshake --external svelte",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch --external svelte",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
     "clean": "rimraf dist"
   },
+  "dependencies": {
+    "zerithdb-sdk": "workspace:*"
+  },
   "peerDependencies": {
-    "svelte": "^4.0.0 || ^5.0.0",
-    "zerithdb-sdk": "*"
+    "svelte": "^4.0.0 || ^5.0.0"
   },
   "devDependencies": {
-    "zerithdb-eslint-config": "workspace:*",
-    "zerithdb-tsconfig": "workspace:*",
-    "svelte": "^4.2.0",
     "rimraf": "^6.0.1",
+    "svelte": "^4.2.0",
+    "svelte-check": "^3.8.0",
     "tsup": "^8.2.4",
-    "typescript": "^5.5.0"
-  }
+    "typescript": "^5.5.4",
+    "zerithdb-eslint-config": "workspace:*",
+    "zerithdb-tsconfig": "workspace:*"
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
 }
