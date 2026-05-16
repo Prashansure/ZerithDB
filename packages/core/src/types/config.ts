@@ -6,6 +6,13 @@ export interface SyncConfig {
   signalingUrl?: string;
 
   /**
+   * Multiple signaling server URLs for automatic failover.
+   * Tried in order — falls back to the next on failure.
+   * Takes priority over signalingUrl if both are set.
+   */
+  signalingUrls?: string[];
+
+  /**
    * STUN/TURN server URLs for WebRTC ICE negotiation.
    * @default Uses Google's public STUN servers
    */

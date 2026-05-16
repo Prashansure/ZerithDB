@@ -17,6 +17,8 @@ interface SignalingMessage {
   payload: unknown;
 }
 
+const DEFAULT_SIGNALING_URL = "wss://arpitkhandelwal810-zerith-signaling.hf.space";
+
 /**
  * Manages WebRTC peer-to-peer connections for a ZerithDB app.
  *
@@ -32,6 +34,7 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private disposed = false;
+  private currentUrlIndex = 0;
 
   constructor(
     private readonly config: ZerithDBConfig,
@@ -41,51 +44,92 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
   }
 
   /**
-   * Connect to the signaling server and join the P2P room.
-   * After connection, WebRTC handshakes happen automatically.
+   * Returns the ordered list of signaling URLs to try.
+   * Supports both signalingUrls (array) and signalingUrl (single).
+   * Falls back to the default URL if neither is set.
    */
-  async connect(roomId: string): Promise<void> {
-    const signalingUrl =
-      this.config.sync?.signalingUrl ?? "wss://arpitkhandelwal810-zerith-signaling.hf.space";
-    const url = `${signalingUrl}?room=${encodeURIComponent(roomId)}&peer=${this.localPeerId}`;
+  private getSignalingUrls(): string[] {
+    if (this.config.sync?.signalingUrls && this.config.sync.signalingUrls.length > 0) {
+      return this.config.sync.signalingUrls;
+    }
+    return [this.config.sync?.signalingUrl ?? DEFAULT_SIGNALING_URL];
+  }
+
+  /**
+   * Try connecting to a single signaling URL.
+   * Resolves on success, rejects on error.
+   */
+  private connectToUrl(url: string, roomId: string): Promise<void> {
+    const fullUrl = `${url}?room=${encodeURIComponent(roomId)}&peer=${this.localPeerId}`;
 
     return new Promise((resolve, reject) => {
+      let ws: WebSocket;
       try {
-        this.ws = new WebSocket(url);
+        ws = new WebSocket(fullUrl);
       } catch (err) {
         reject(
           new ZerithDBError(
             ErrorCode.NETWORK_SIGNALING_FAILED,
-            `Failed to connect to signaling server: ${signalingUrl}`,
+            `Failed to connect to signaling server: ${url}`,
             { cause: err }
           )
         );
         return;
       }
 
-      this.ws.onopen = () => {
+      ws.onopen = () => {
+        this.ws = ws;
         this.reconnectAttempts = 0;
         resolve();
       };
 
-      this.ws.onerror = (err) => {
+      ws.onerror = () => {
         reject(
-          new ZerithDBError(ErrorCode.NETWORK_SIGNALING_FAILED, "WebSocket signaling error", {
-            cause: err,
-          })
+          new ZerithDBError(
+            ErrorCode.NETWORK_SIGNALING_FAILED,
+            `WebSocket error on signaling server: ${url}`
+          )
         );
       };
 
-      this.ws.onmessage = (event: MessageEvent<string>) => {
+      ws.onmessage = (event: MessageEvent<string>) => {
         this.handleSignalingMessage(JSON.parse(event.data) as SignalingMessage);
       };
 
-      this.ws.onclose = () => {
+      ws.onclose = () => {
         if (!this.disposed) {
           this.scheduleReconnect(roomId);
         }
       };
     });
+  }
+
+  /**
+   * Connect to the signaling server and join the P2P room.
+   * Tries each URL in order — automatically fails over to the next on failure.
+   */
+  async connect(roomId: string): Promise<void> {
+    const urls = this.getSignalingUrls();
+
+    // Try each URL starting from currentUrlIndex
+    for (let i = 0; i < urls.length; i++) {
+      const index = (this.currentUrlIndex + i) % urls.length;
+      const url = urls[index];
+
+      try {
+        await this.connectToUrl(url, roomId);
+        this.currentUrlIndex = index; // remember which one worked
+        return;
+      } catch {
+        console.warn(`[ZerithDB] Signaling server failed: ${url}. Trying next...`);
+      }
+    }
+
+    // All URLs failed
+    throw new ZerithDBError(
+      ErrorCode.NETWORK_SIGNALING_FAILED,
+      `All signaling servers failed. Tried: ${urls.join(", ")}`
+    );
   }
 
   /**
@@ -145,7 +189,6 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
   private handleSignalingMessage(msg: SignalingMessage): void {
     switch (msg.type) {
       case "peer-list":
-        // Server sends list of existing peers — initiate connections
         for (const peerId of msg.payload as PeerId[]) {
           if (peerId !== this.localPeerId) {
             this.createPeer(peerId, true);
@@ -204,7 +247,7 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
     peer.on("connect", () => {
       const info: PeerInfo = {
         peerId: remotePeerId,
-        did: "", // filled in via auth handshake message
+        did: "",
         publicKey: "",
         connectedAt: Date.now(),
       };
@@ -239,11 +282,15 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
   }
 
   private scheduleReconnect(roomId: string): void {
+    const urls = this.getSignalingUrls();
     const delay = this.config.network?.reconnectDelay ?? 1000;
     const backoff = Math.min(delay * 2 ** this.reconnectAttempts, 30_000);
     const jitter = Math.random() * 1000;
 
+    // Round-robin to next URL on reconnect
+    this.currentUrlIndex = (this.currentUrlIndex + 1) % urls.length;
     this.reconnectAttempts++;
+
     this.reconnectTimer = setTimeout(() => {
       void this.connect(roomId);
     }, backoff + jitter);
