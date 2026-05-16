@@ -2,12 +2,16 @@ import SimplePeer from "simple-peer";
 import type { ZerithDBConfig, PeerId, PeerInfo } from "zerithdb-core";
 import { EventEmitter, ZerithDBError, ErrorCode } from "zerithdb-core";
 import type { AuthManager } from "zerithdb-auth";
+import type { SignalingTransport } from "./signaling-transport.js";
+import { WebSocketTransport } from "./transports/websocket-transport.js";
+import { PollingTransport } from "./transports/polling-transport.js";
 
 type NetworkEvents = {
   "peer:connected": PeerInfo;
   "peer:disconnected": { peerId: PeerId };
   message: { type: string; payload: Uint8Array | string; from: PeerId };
   error: { peerId: PeerId; error: Error };
+  "transport:downgrade": { from: "websocket"; to: "polling"; reason: string };
 };
 
 interface SignalingMessage {
@@ -25,9 +29,17 @@ const DEFAULT_SIGNALING_URL = "wss://arpitkhandelwal810-zerith-signaling.hf.spac
  * Architecture: Full mesh — every peer connects to every other peer.
  * The signaling server only handles the initial WebRTC handshake (ICE/SDP).
  * After that, all data flows peer-to-peer over encrypted WebRTC data channels.
+ *
+ * Supports automatic transport fallback: if WebSocket signaling is blocked
+ * (e.g. by corporate firewalls), the manager transparently downgrades to
+ * HTTP long-polling.
+ *
+ * Supports multiple signaling server URLs with automatic failover:
+ * if one server fails, the next URL in the list is tried automatically.
  */
 export class NetworkManager extends EventEmitter<NetworkEvents> {
-  private ws: WebSocket | null = null;
+  private transport: SignalingTransport | null = null;
+  private activeTransportType: "websocket" | "polling" | null = null;
   private readonly peers = new Map<PeerId, SimplePeer.Instance>();
   private readonly peerInfo = new Map<PeerId, PeerInfo>();
   private localPeerId: PeerId = crypto.randomUUID();
@@ -43,6 +55,11 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
     super();
   }
 
+  /** The transport type currently in use, or null if not connected */
+  get transportType(): "websocket" | "polling" | null {
+    return this.activeTransportType;
+  }
+
   /**
    * Returns the ordered list of signaling URLs to try.
    * Supports both signalingUrls (array) and signalingUrl (single).
@@ -56,80 +73,68 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
   }
 
   /**
-   * Try connecting to a single signaling URL.
-   * Resolves on success, rejects on error.
-   */
-  private connectToUrl(url: string, roomId: string): Promise<void> {
-    const fullUrl = `${url}?room=${encodeURIComponent(roomId)}&peer=${this.localPeerId}`;
-
-    return new Promise((resolve, reject) => {
-      let ws: WebSocket;
-      try {
-        ws = new WebSocket(fullUrl);
-      } catch (err) {
-        reject(
-          new ZerithDBError(
-            ErrorCode.NETWORK_SIGNALING_FAILED,
-            `Failed to connect to signaling server: ${url}`,
-            { cause: err }
-          )
-        );
-        return;
-      }
-
-      ws.onopen = () => {
-        this.ws = ws;
-        this.reconnectAttempts = 0;
-        resolve();
-      };
-
-      ws.onerror = () => {
-        reject(
-          new ZerithDBError(
-            ErrorCode.NETWORK_SIGNALING_FAILED,
-            `WebSocket error on signaling server: ${url}`
-          )
-        );
-      };
-
-      ws.onmessage = (event: MessageEvent<string>) => {
-        this.handleSignalingMessage(JSON.parse(event.data) as SignalingMessage);
-      };
-
-      ws.onclose = () => {
-        if (!this.disposed) {
-          this.scheduleReconnect(roomId);
-        }
-      };
-    });
-  }
-
-  /**
    * Connect to the signaling server and join the P2P room.
    * Tries each URL in order — automatically fails over to the next on failure.
+   *
+   * Transport selection per URL:
+   * - `"auto"` (default): Try WebSocket first, fall back to HTTP long-polling.
+   * - `"websocket"`: WebSocket only.
+   * - `"polling"`: HTTP long-polling only.
    */
   async connect(roomId: string): Promise<void> {
     const urls = this.getSignalingUrls();
 
-    // Try each URL starting from currentUrlIndex
     for (let i = 0; i < urls.length; i++) {
       const index = (this.currentUrlIndex + i) % urls.length;
       const url = urls[index];
 
       try {
         await this.connectToUrl(url, roomId);
-        this.currentUrlIndex = index; // remember which one worked
+        this.currentUrlIndex = index;
         return;
       } catch {
         console.warn(`[ZerithDB] Signaling server failed: ${url}. Trying next...`);
       }
     }
 
-    // All URLs failed
     throw new ZerithDBError(
       ErrorCode.NETWORK_SIGNALING_FAILED,
       `All signaling servers failed. Tried: ${urls.join(", ")}`
     );
+  }
+
+  /**
+   * Try connecting to a single signaling URL using the configured transport.
+   */
+  private async connectToUrl(signalingUrl: string, roomId: string): Promise<void> {
+    const transportPref = this.config.sync?.transport ?? "auto";
+
+    if (transportPref === "websocket") {
+      await this.connectWebSocket(signalingUrl, roomId);
+    } else if (transportPref === "polling") {
+      await this.connectPolling(signalingUrl, roomId);
+    } else {
+      // "auto" — try WebSocket first, fall back to polling
+      try {
+        await this.connectWebSocket(signalingUrl, roomId);
+      } catch (wsError) {
+        const reason =
+          wsError instanceof Error ? wsError.message : "WebSocket connection failed";
+
+        this.emit("transport:downgrade", {
+          from: "websocket",
+          to: "polling",
+          reason,
+        });
+
+        console.warn(
+          `[ZerithDB] WebSocket signaling failed (${reason}). ` +
+            `Falling back to HTTP long-polling.`
+        );
+
+        await this.connectPolling(signalingUrl, roomId);
+      }
+    }
   }
 
   /**
@@ -178,13 +183,70 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
     }
     this.peers.clear();
     this.peerInfo.clear();
-    if (this.ws !== null) {
-      this.ws.close();
-      this.ws = null;
+    if (this.transport !== null) {
+      this.transport.close();
+      this.transport = null;
     }
+    this.activeTransportType = null;
   }
 
-  // ─── Private ──────────────────────────────────────────────────────────────
+  // ─── Private — Transport setup ────────────────────────────────────────────
+
+  private async connectWebSocket(signalingUrl: string, roomId: string): Promise<void> {
+    const url = `${signalingUrl}?room=${encodeURIComponent(roomId)}&peer=${this.localPeerId}`;
+
+    const wsTransport = new WebSocketTransport();
+    await wsTransport.connect(url, 5000);
+
+    this.attachTransport(wsTransport, roomId);
+    this.activeTransportType = "websocket";
+    this.reconnectAttempts = 0;
+  }
+
+  private async connectPolling(signalingUrl: string, roomId: string): Promise<void> {
+    const httpUrl = this.wsUrlToHttp(signalingUrl);
+
+    const pollTransport = new PollingTransport(httpUrl);
+    await pollTransport.connect(roomId, this.localPeerId);
+
+    this.attachTransport(pollTransport, roomId);
+    this.activeTransportType = "polling";
+    this.reconnectAttempts = 0;
+  }
+
+  private attachTransport(transport: SignalingTransport, roomId: string): void {
+    if (this.transport !== null) {
+      this.transport.close();
+    }
+
+    this.transport = transport;
+
+    transport.onMessage((data: string) => {
+      this.handleSignalingMessage(JSON.parse(data) as SignalingMessage);
+    });
+
+    transport.onClose(() => {
+      if (!this.disposed) {
+        this.scheduleReconnect(roomId);
+      }
+    });
+
+    transport.onError((err) => {
+      console.error("[ZerithDB] Signaling transport error:", err);
+    });
+  }
+
+  private wsUrlToHttp(wsUrl: string): string {
+    if (wsUrl.startsWith("wss://")) {
+      return "https://" + wsUrl.slice(6);
+    }
+    if (wsUrl.startsWith("ws://")) {
+      return "http://" + wsUrl.slice(5);
+    }
+    return wsUrl;
+  }
+
+  // ─── Private — Signaling message handling ─────────────────────────────────
 
   private handleSignalingMessage(msg: SignalingMessage): void {
     switch (msg.type) {
@@ -234,7 +296,7 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
     }
 
     peer.on("signal", (data) => {
-      this.ws?.send(
+      this.transport?.send(
         JSON.stringify({
           type: initiator ? "offer" : "answer",
           from: this.localPeerId,
@@ -287,7 +349,6 @@ export class NetworkManager extends EventEmitter<NetworkEvents> {
     const backoff = Math.min(delay * 2 ** this.reconnectAttempts, 30_000);
     const jitter = Math.random() * 1000;
 
-    // Round-robin to next URL on reconnect
     this.currentUrlIndex = (this.currentUrlIndex + 1) % urls.length;
     this.reconnectAttempts++;
 

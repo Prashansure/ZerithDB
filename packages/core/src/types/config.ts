@@ -24,6 +24,15 @@ export interface SyncConfig {
    * @default 10
    */
   maxPeers?: number;
+
+  /**
+   * Signaling transport preference.
+   * - `"auto"`      — Try WebSocket first, fall back to HTTP long-polling (default)
+   * - `"websocket"` — WebSocket only (original behavior)
+   * - `"polling"`   — HTTP long-polling only (for strict firewall environments)
+   * @default "auto"
+   */
+  transport?: "auto" | "websocket" | "polling";
 }
 
 export interface AuthConfig {

@@ -72,6 +72,7 @@ export function createApp(config: ZerithDBConfig): ZerithDBApp {
     sync: {
       signalingUrl: "wss://signal.zerithdb.dev",
       maxPeers: 10,
+      transport: "auto",
       ...config.sync,
     },
     auth: {

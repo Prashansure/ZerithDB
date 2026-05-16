@@ -129,6 +129,19 @@ describe("DbClient — CollectionClient", () => {
       const after = (await col.findById(id))?._updatedAt ?? 0;
       expect(after).toBeGreaterThanOrEqual(before);
     });
+
+    it("should unset matching document fields", async () => {
+      const col = db.collection<{ text: string; note?: string }>("todos");
+      const { id } = await col.insert({ text: "fix bug", note: "remove me" });
+
+      const count = await col.update({ text: "fix bug" }, { $unset: { note: true } });
+
+      const doc = await col.findById(id);
+      expect(count).toBe(1);
+      expect(doc).toBeDefined();
+      expect(doc).not.toHaveProperty("note");
+      expect(doc?.text).toBe("fix bug");
+    });
   });
 
   describe("delete()", () => {

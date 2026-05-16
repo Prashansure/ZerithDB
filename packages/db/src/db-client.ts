@@ -116,13 +116,7 @@ export class CollectionClient<T extends Record<string, any> = Record<string, any
       const matches = await this.find(filter);
       const now = Date.now();
 
-      await this.table.bulkPut(
-        matches.map((doc) => ({
-          ...doc,
-          ...(spec.$set ?? {}),
-          _updatedAt: now,
-        }))
-      );
+      await this.table.bulkPut(matches.map((doc) => this.applyUpdateSpec(doc, spec, now)));
 
       return matches.length;
     } catch (err) {
@@ -173,6 +167,24 @@ export class CollectionClient<T extends Record<string, any> = Record<string, any
   async count(filter: QueryFilter<T> = {}): Promise<number> {
     const docs = await this.find(filter);
     return docs.length;
+  }
+
+  private applyUpdateSpec(doc: Document<T>, spec: UpdateSpec<T>, updatedAt: number): Document<T> {
+    const next = {
+      ...doc,
+      ...(spec.$set ?? {}),
+      _updatedAt: updatedAt,
+    } as Record<string, any>;
+
+    for (const key of Object.keys(spec.$unset ?? {})) {
+      delete next[key];
+    }
+
+    next._id = doc._id;
+    next._createdAt = doc._createdAt;
+    next._updatedAt = updatedAt;
+
+    return next as Document<T>;
   }
 
   private matchesFilter(doc: Document<T>, filter: QueryFilter<T>): boolean {
