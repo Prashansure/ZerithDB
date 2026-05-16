@@ -1,0 +1,22 @@
+{
+  "name": "zerithdb-svelte",
+  "version": "0.1.0",
+  "description": "Svelte store integration for ZerithDB",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "svelte": "^4.0.0 || ^5.0.0",
+    "zerithdb-sdk": "*"
+  },
+  "devDependencies": {
+    "svelte": "^4.2.0",
+    "typescript": "^5.5.0"
+  }
+}
