@@ -3,6 +3,7 @@ import { program } from "commander";
 import chalk from "chalk";
 import { initCommand } from "./commands/init.js";
 import { signalCommand } from "./commands/signal.js";
+import { maintenanceCommand } from "./commands/maintenance.js";
 import { checkConnectivity } from "./checkConnectivity.js";
 
 const VERSION = "0.1.0";
@@ -33,6 +34,11 @@ async function main() {
     .option("-t, --template <template>", "Starter template", "todo")
     .option("--no-install", "Skip dependency installation")
     .action(initCommand);
+
+  program
+    .command("maintenance <status>")
+    .description("Toggle maintenance mode for the signaling server (on/off)")
+    .action(maintenanceCommand);
 
   program
     .command("signal")
